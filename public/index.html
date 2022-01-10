@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.12.6/babel.js" crossorigin></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/jsx">
+    const api = {
+        get(url) {
+            switch (url) {
+                case '/lots':
+                    return new Promise((resolve) => {
+                        setTimeout(() => {
+                            resolve([
+                                {
+                                    id: 1,
+                                    name: 'Apple',
+                                    description: 'Apple description',
+                                    price: 16
+                                },
+                                {
+                                    id: 2,
+                                    name: 'Orange',
+                                    description: 'Orange description',
+                                    price: 41
+                                }
+                            ])
+                        }, 1000)
+                    })
+                default:
+                    throw new Error('==>')
+            }
+        }
+    }
+
+    const stream = {
+        subscribe(channel, listener) {
+            const match = /price-(\d+)/.exec(channel)
+            //console.log(channel)
+            if (match) {
+                setInterval(() => {
+                    listener({
+                        id: parseInt(match[1]),
+                        price: Math.round(Math.random() * 10 + 30)
+                    })
+                }, 400)
+            }
+        }
+    }
+    const initialState = {
+        time: new Date(),
+        lots: null
+    }
+
+
+    class Store {
+        constructor(initialState) {
+            this.state = initialState
+            this.listeners = []
+        }
+
+        subscribe(callback) {
+            this.listeners.push(callback)
+        }
+
+        getState() {
+            return this.state
+        }
+
+        changeState(diff) {
+            this.state = {
+                ...this.state,
+                ...(typeof diff === 'function' ? diff(this.state) : diff)
+            }
+
+            this.listeners.forEach((listener) => {
+                listener()
+            })
+        }
+    }
+
+    const store = new Store(initialState)
+
+    function App(state) {
+        return (
+            <div className="app">
+                <Header/>
+                <Clock time={state.time}/>
+                <Lots lots={state.lots}/>
+            </div>
+        )
+        /*return React.createElement('div', {className: 'app'},
+            React.createElement(Header),
+            React.createElement(Clock, {time: state.time}),
+            React.createElement(Lots, {lots: state.lots})
+        )*/
+    }
+
+    function Header() {
+        return (
+            <header className="header">
+                <Logo/>
+            </header>
+        )
+        //return React.createElement('header', {className: 'header'}, React.createElement(Logo))
+    }
+
+    function Logo() {
+        return <img className="logo" src="logo.png" alt=""/>
+        //return React.createElement('img', {className: 'logo', src: 'logo.png'})
+    }
+
+    function Clock({time}) {
+        const isDay = time.getHours() >= 7 && time.getHours() <= 21
+        return React.createElement(
+            'div', {className: 'clock'},
+            React.createElement('span', {className: 'value'}, time.toLocaleTimeString()),
+            React.createElement('span', {className: isDay ? 'icon day' : 'icon night'}))
+    }
+
+    function Loading() {
+        return React.createElement('div', {className: 'loading'}, 'Loading...')
+    }
+
+    function Lots({lots}) {
+        if (lots === null) return React.createElement(Loading)
+
+        return React.createElement('div', {className: 'lots'},
+            lots.map((lot) => React.createElement(Lot, {lot, key: lot.id}))
+        )
+    }
+
+    function Lot({lot}) {
+        return React.createElement('article', {className: 'lot'},
+            React.createElement('div', {className: 'price'}, lot.price),
+            React.createElement('h1', {}, lot.name),
+            React.createElement('p', {}, lot.description),
+        )
+    }
+
+    renderView(store.getState())
+
+    setInterval(function () {
+        store.changeState({
+            time: new Date()
+        })
+    }, 1000)
+
+    api.get('/lots').then((lots) => {
+        store.changeState({lots})
+        const onPrice = (data) => {
+            store.changeState((state) => ({
+                lots: state.lots.map((lot) => {
+                    if (lot.id === data.id) {
+                        return {
+                            ...lot,
+                            price: data.price
+                        }
+                    }
+                    return lot
+                })
+            }))
+        }
+        lots.forEach((lot) => {
+            stream.subscribe('price-' + lot.id, onPrice)
+        })
+    })
+
+    function renderView(state) {
+        ReactDOM.render(
+            React.createElement(App, state),
+            document.getElementById('root'))
+    }
+
+    store.subscribe(() => {
+        renderView(store.getState())
+    })
+
+    function render(virtualDom, realDomRoot) {
+        const evaluatedVirtualDom = evaluate(virtualDom)
+        const virtualDomRoot = {
+            type: realDomRoot.tagName.toLowerCase(),
+            props: {
+                id: realDomRoot.id,
+                children: [
+                    evaluatedVirtualDom
+                ]
+            }
+        }
+        sync(virtualDomRoot, realDomRoot)
+    }
+
+    function evaluate(virtualNode) {
+        if (typeof virtualNode !== 'object') {
+            return virtualNode
+        }
+        if (typeof virtualNode.type === 'function') {
+            return evaluate((virtualNode.type)(virtualNode.props))
+        }
+
+        const props = virtualNode.props || {}
+        return {
+            ...virtualNode,
+            props: {
+                ...props,
+                children: Array.isArray(props.children) ? props.children.map(evaluate) : [evaluate(props.children)]
+            }
+        }
+    }
+
+    function sync(virtualNode, realNode) {
+        if (virtualNode.props) {
+            Object.entries(virtualNode.props).forEach(([name, value]) => {
+                if (name === 'children' || name === 'key') return
+                if (realNode[name] !== value) realNode[name] = value
+            })
+        }
+        if (virtualNode.key) realNode.dataset.key = virtualNode.key
+        if (typeof virtualNode !== 'object' && virtualNode !== realNode.nodeValue)
+            realNode.nodeValue = virtualNode
+
+        const virtualChildren = virtualNode.props ? (virtualNode.props.children || []) : []
+        const realChildren = realNode.childNodes
+
+        for (let i = 0; i < virtualChildren.length || i < realChildren.length; i++) {
+            const virtual = virtualChildren[i]
+            const real = realChildren[i]
+            //Remove
+            if (virtual === undefined && real !== undefined) {
+                realNode.remove(real)
+            }
+            //Update
+            if (virtual !== undefined && real !== undefined && (virtual.type || '') === (real.tagName || '').toLowerCase()) {
+                sync(virtual, real)
+            }
+            //Replace
+            if (virtual !== undefined && real !== undefined && (virtual.type || '') !== (real.tagName || '').toLowerCase()) {
+                const newReal = createRealNodeByVirtual(virtual)
+                sync(virtual, newReal)
+                realNode.replaceChild(newReal, real)
+            }
+            //Add
+            if (virtual !== undefined && real === undefined) {
+                const newReal = createRealNodeByVirtual(virtual)
+                sync(virtual, newReal)
+                realNode.appendChild(newReal)
+            }
+        }
+    }
+
+    function createRealNodeByVirtual(virtual) {
+        if (typeof virtual !== 'object') {
+            return document.createTextNode('')
+        }
+        return document.createElement(virtual.type)
+    }
+</script>
+
+</body>
+</html>
