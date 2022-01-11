@@ -7,6 +7,7 @@
     <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone@7.12.6/babel.js" crossorigin></script>
+    <script src="https://unpkg.com/redux@4/dist/redux.js" crossorigin></script>
 </head>
 <body>
 <div id="root"></div>
@@ -43,7 +44,6 @@
     const stream = {
         subscribe(channel, listener) {
             const match = /price-(\d+)/.exec(channel)
-            //console.log(channel)
             if (match) {
                 setInterval(() => {
                     listener({
@@ -54,46 +54,140 @@
             }
         }
     }
+    /////////////////////////////////////
 
-    const initialState = {
-        time: new Date(),
+
+
+    const state = {
+        clock: {
+            time: new Date()
+        },
+        auction: {
+            lots: null
+        }
+    }
+
+    const clockInitialState = {
+        time: new Date()
+    }
+    const SET_TIME = 'SET_TIME'
+
+    const auctionInitialState = {
         lots: null
+    }
+    const SET_LOTS = 'SET_LOTS'
+    const CHANGE_LOT_PRICE = 'CHANGE_LOT_PRICE'
+
+    function clockReducer(state = clockInitialState, action) {
+        switch (action.type) {
+            case SET_TIME:
+                return {
+                    ...state,
+                    time: action.time
+                }
+            default:
+                return state
+        }
+    }
+
+    function auctionReducer(state = auctionInitialState, action) {
+        switch (action.type) {
+            case SET_LOTS:
+                return {
+                    ...state,
+                    lots: action.lots
+                }
+            case CHANGE_LOT_PRICE:
+                return {
+                    ...state,
+                    lots: state.lots.map((lot) => {
+                        if (lot.id === action.id) {
+                            return {
+                                ...lot,
+                                price: action.price
+                            }
+                        }
+                        return lot
+                    })
+                }
+            default:
+                return state
+        }
+    }
+
+    function setTime(time) {
+        return {
+            type: SET_TIME,
+            time
+        }
+    }
+    function setLots(lots) {
+        return {
+            type: SET_LOTS,
+            lots
+        }
+    }
+
+    function changeLotPrice(id, price){
+        return {
+            type: CHANGE_LOT_PRICE,
+            id,
+            price
+        }
     }
 
     class Store {
-        constructor(initialState) {
-            this.state = initialState
+        constructor(reducer, initialState) {
+            this.state = reducer(initialState, {type: null})
+            this.reduser = reducer
             this.listeners = []
         }
 
         subscribe(callback) {
             this.listeners.push(callback)
+
+            return () => {
+                const index = this.listeners.indexOf(callback)
+                this.listeners.splice(index, 1)
+            }
         }
 
         getState() {
             return this.state
         }
 
-        changeState(diff) {
-            this.state = {
-                ...this.state,
-                ...(typeof diff === 'function' ? diff(this.state) : diff)
-            }
-
-            this.listeners.forEach((listener) => {
-                listener()
-            })
+        setState(state) {
+            this.state = (typeof state === 'function' ? state(this.state) : state)
+            this.listeners.forEach((listener) => listener())
         }
+
+        dispatch(action) {
+            this.state = this.reduser(this.state, action)
+            this.listeners.forEach((listener) => listener())
+        }
+
     }
 
-    const store = new Store(initialState)
+    function combineReducers(reducers) {
+        return (state = {}, action) => {
+            const result = {}
+            Object.entries(reducers).forEach(([key, reducer]) => {
+                result[key] = reducer(state[key], action)
+            })
+            return result
+        }
+    }
+    const store = Redux.createStore(Redux.combineReducers({
+        clock: clockReducer,
+        auction: auctionReducer
+    }))
 
     function App(state) {
         return (
             <div className="app">
                 <Header/>
-                <Clock time={state.time}/>
-                <Lots lots={state.lots}/>
+                <Clock time={state.clock.time}/>
+                <Lots lots={state.auction.lots}/>
             </div>
         )
         /*return React.createElement('div', {className: 'app'},
@@ -148,28 +242,16 @@
     renderView(store.getState())
 
     setInterval(function () {
-        store.changeState({
-            time: new Date()
-        })
+        store.dispatch(setTime(new Date()))
     }, 1000)
 
     api.get('/lots').then((lots) => {
-        store.changeState({lots})
-        const onPrice = (data) => {
-            store.changeState((state) => ({
-                lots: state.lots.map((lot) => {
-                    if (lot.id === data.id) {
-                        return {
-                            ...lot,
-                            price: data.price
-                        }
-                    }
-                    return lot
-                })
-            }))
-        }
+        store.dispatch(setLots(lots))
+
         lots.forEach((lot) => {
-            stream.subscribe('price-' + lot.id, onPrice)
+            stream.subscribe('price-' + lot.id, (data) => {
+                store.dispatch(changeLotPrice(data.id, data.price))
+            })
         })
     })
 
@@ -179,9 +261,10 @@
             document.getElementById('root'))
     }
 
-    store.subscribe(() => {
+    const unsubscribe = store.subscribe(() => {
         renderView(store.getState())
     })
+
 
     function render(virtualDom, realDomRoot) {
         const evaluatedVirtualDom = evaluate(virtualDom)
